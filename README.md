@@ -14,9 +14,3 @@ You can optimize:
 - `bound_down`: RSI oversold threshold
 - `window`: RSI calculation window
 
-## 🛠️ Requirements
-
-Ensure you have the following Python packages installed:
-
-```bash
-pip install backtesting yfinance ta-lib pandas

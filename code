@@ -1,0 +1,74 @@
+from backtesting import Backtest, Strategy
+import multiprocessing
+import yfinance as yf
+import talib
+import pandas as pd
+import time
+
+# Retry logic for downloading data
+def safe_download(symbol, start, end, retries=5, delay=10):
+    for attempt in range(retries):
+        try:
+            data = yf.download(symbol, start=start, end=end, auto_adjust=False)
+            if not data.empty:
+                print(f"Downloaded data for {symbol}")
+                return data
+        except Exception as e:
+            print(f"Attempt {attempt+1}/{retries} failed for {symbol}: {e}")
+        print(f"Retrying in {delay} seconds...")
+        time.sleep(delay)
+    return pd.DataFrame()
+
+# Try downloading ^NSEI or fallback to RELIANCE.NS
+reliance_data = safe_download('^NSEI', '2015-01-01', '2024-12-31')
+if reliance_data.empty:
+    print("Primary symbol failed. Trying fallback symbol 'RELIANCE.NS'...")
+    reliance_data = safe_download('RELIANCE.NS', '2015-01-01', '2024-12-31')
+
+# Step 2: Fix columns
+if isinstance(reliance_data.columns, pd.MultiIndex):
+    reliance_data.columns = reliance_data.columns.get_level_values(0)
+
+# Step 3: Prepare data
+try:
+    reliance_data = reliance_data[['Open', 'High', 'Low', 'Close', 'Volume']]
+    reliance_data.dropna(inplace=True)
+    if reliance_data.empty:
+        raise ValueError("Final dataset is empty after cleaning.")
+except Exception as e:
+    print(f"Data processing error: {e}")
+    exit()
+
+# Step 4: Strategy
+class RsiOscillator(Strategy):
+    bound_up = 70
+    bound_down = 30
+    window = 7
+
+    def init(self):
+        self.rsi = self.I(talib.RSI, self.data.Close, self.window)
+
+    def next(self):
+        if self.rsi[-1] < self.bound_down and not self.position:
+            self.buy()
+        elif self.rsi[-1] > self.bound_up and self.position.is_long:
+            self.position.close()
+
+# Step 5: Optimization
+def run_optimization():
+    bt = Backtest(reliance_data, RsiOscillator, cash=10_000)
+    stats = bt.optimize(
+        bound_up=range(60, 85, 5),
+        bound_down=range(15, 40, 5),
+        window=range(5, 15, 2),
+        maximize='Sharpe Ratio',
+        constraint=lambda p: p.bound_up > p.bound_down
+    )
+    print(stats)
+    bt.plot()
+
+# Step 6: Main
+if name == 'main':
+    multiprocessing.set_start_method("spawn", force=True)
+    run_optimization()
+
